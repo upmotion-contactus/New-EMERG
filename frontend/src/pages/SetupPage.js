@@ -101,10 +101,16 @@ export default function SetupPage() {
       setProgress(95);
       toast.success('Moltbot started successfully!');
       
+      // Build the Control UI URL with token for authentication
+      // The Control UI accepts token as a query parameter which it stores in localStorage
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const gatewayWsUrl = `${wsProtocol}//${window.location.host}/api/moltbot/ws`;
+      const controlUrl = `${data.controlUrl}?gatewayUrl=${encodeURIComponent(gatewayWsUrl)}&token=${encodeURIComponent(data.token)}`;
+      
       // Small delay before redirect
       setTimeout(() => {
         setProgress(100);
-        window.location.href = data.controlUrl;
+        window.location.href = controlUrl;
       }, 1000);
 
     } catch (e) {
