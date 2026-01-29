@@ -1,0 +1,362 @@
+import React, { useMemo, useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { Progress } from '@/components/ui/progress';
+import { toast } from 'sonner';
+import { Eye, EyeOff, Loader2, ExternalLink, CheckCircle2 } from 'lucide-react';
+
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
+const API = `${BACKEND_URL}/api`;
+
+export default function SetupPage() {
+  const [provider, setProvider] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [reveal, setReveal] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [progress, setProgress] = useState(0);
+  const [status, setStatus] = useState(null);
+  const [checkingStatus, setCheckingStatus] = useState(true);
+
+  // Check if Moltbot is already running on mount
+  useEffect(() => {
+    checkStatus();
+  }, []);
+
+  const checkStatus = async () => {
+    setCheckingStatus(true);
+    try {
+      const res = await fetch(`${API}/moltbot/status`);
+      if (res.ok) {
+        const data = await res.json();
+        setStatus(data);
+        if (data.running) {
+          // If already running, redirect to control UI
+          toast.success('Moltbot is already running!');
+        }
+      }
+    } catch (e) {
+      console.error('Status check failed:', e);
+    } finally {
+      setCheckingStatus(false);
+    }
+  };
+
+  const stageText = useMemo(() => {
+    if (progress < 10) return 'Waiting to start';
+    if (progress < 30) return 'Validating configuration...';
+    if (progress < 60) return 'Starting Moltbot services...';
+    if (progress < 85) return 'Initializing Control UI...';
+    if (progress < 95) return 'Almost ready...';
+    return 'Redirecting to Control UI';
+  }, [progress]);
+
+  const goToControlUI = () => {
+    window.location.href = `${API}/moltbot/ui/`;
+  };
+
+  async function start() {
+    setError('');
+    if (!provider) {
+      setError('Please choose a provider.');
+      toast.error('Please choose a provider');
+      return;
+    }
+    if (!apiKey || apiKey.length < 10) {
+      setError('Please enter a valid API key.');
+      toast.error('Please enter a valid API key');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setProgress(15);
+
+      // Simulate progress while waiting
+      const progressInterval = setInterval(() => {
+        setProgress(prev => {
+          if (prev < 80) return prev + Math.random() * 10;
+          return prev;
+        });
+      }, 500);
+
+      const res = await fetch(`${API}/moltbot/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, apiKey })
+      });
+
+      clearInterval(progressInterval);
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ detail: 'Startup failed' }));
+        throw new Error(data.detail || 'Startup failed');
+      }
+
+      const data = await res.json();
+      setProgress(95);
+      toast.success('Moltbot started successfully!');
+      
+      // Small delay before redirect
+      setTimeout(() => {
+        setProgress(100);
+        window.location.href = data.controlUrl;
+      }, 1000);
+
+    } catch (e) {
+      console.error(e);
+      setError(e.message || 'Unable to start Moltbot');
+      toast.error('Startup error: ' + (e.message || 'Unknown error'));
+      setLoading(false);
+      setProgress(0);
+    }
+  }
+
+  if (checkingStatus) {
+    return (
+      <div className="min-h-screen bg-[#0f0f10] flex items-center justify-center">
+        <div className="text-zinc-400 flex items-center gap-2">
+          <Loader2 className="w-5 h-5 animate-spin" />
+          Checking Moltbot status...
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-[#0f0f10] text-zinc-100">
+      {/* Subtle texture overlay */}
+      <div className="texture-noise" aria-hidden="true" />
+
+      {/* Header */}
+      <header className="relative z-10 container mx-auto px-4 sm:px-6 py-8 sm:py-12">
+        <motion.div 
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3 }}
+          className="max-w-lg"
+        >
+          <div className="flex items-center gap-3 mb-2">
+            <span className="text-3xl" role="img" aria-label="Moltbot">🦞</span>
+            <h1 className="heading text-2xl sm:text-3xl font-semibold tracking-tight">
+              Moltbot Setup
+            </h1>
+          </div>
+          <p className="text-zinc-400 text-sm sm:text-base">
+            Connect your LLM provider to start the Moltbot Control UI.
+          </p>
+        </motion.div>
+      </header>
+
+      {/* Main Content */}
+      <main className="relative z-10 container mx-auto px-4 sm:px-6 pb-16">
+        {/* If already running, show status card */}
+        {status?.running && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2 }}
+            className="max-w-lg mb-6"
+          >
+            <Card className="border-[#22c55e]/30 bg-[#141416]/95 backdrop-blur-sm">
+              <CardContent className="pt-6">
+                <div className="flex items-center gap-3 text-[#22c55e] mb-4">
+                  <CheckCircle2 className="w-5 h-5" />
+                  <span className="font-medium">Moltbot is running</span>
+                </div>
+                <p className="text-zinc-400 text-sm mb-4">
+                  Provider: <span className="text-zinc-200 capitalize">{status.provider}</span>
+                </p>
+                <Button
+                  onClick={goToControlUI}
+                  className="w-full bg-[#FF4500] hover:bg-[#E63E00] text-white"
+                  data-testid="control-ui-redirect"
+                >
+                  Open Control UI
+                  <ExternalLink className="w-4 h-4 ml-2" />
+                </Button>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
+
+        {/* Setup Card */}
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2, delay: 0.1 }}
+        >
+          <Card className="max-w-lg border-[#1f2022] bg-[#141416]/95 backdrop-blur-sm setup-card">
+            <CardHeader>
+              <CardTitle className="heading text-xl font-semibold">
+                {status?.running ? 'Start New Session' : 'Provider & API Key'}
+              </CardTitle>
+              <CardDescription className="text-zinc-400">
+                {status?.running 
+                  ? 'Restart Moltbot with a different provider or key'
+                  : 'Enter your LLM provider credentials to start Moltbot'
+                }
+              </CardDescription>
+            </CardHeader>
+            
+            <CardContent className="space-y-5">
+              {/* Provider Select */}
+              <div className="space-y-2">
+                <Label htmlFor="provider" className="text-zinc-200">LLM Provider</Label>
+                <Select 
+                  onValueChange={setProvider} 
+                  value={provider}
+                  disabled={loading}
+                >
+                  <SelectTrigger 
+                    id="provider" 
+                    data-testid="provider-select"
+                    className="bg-[#0f0f10] border-[#1f2022] focus:ring-[#FF4500] focus:ring-offset-0 h-11"
+                  >
+                    <SelectValue placeholder="Choose provider" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-[#141416] border-[#1f2022]">
+                    <SelectItem value="anthropic" className="focus:bg-[#1f2022]">
+                      Anthropic (Claude)
+                    </SelectItem>
+                    <SelectItem value="openai" className="focus:bg-[#1f2022]">
+                      OpenAI (GPT)
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* API Key Input */}
+              <div className="space-y-2">
+                <Label htmlFor="apiKey" className="text-zinc-200">API Key</Label>
+                <div className="relative">
+                  <Input
+                    id="apiKey"
+                    data-testid="api-key-input"
+                    type={reveal ? 'text' : 'password'}
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    disabled={loading}
+                    className="pr-20 tracking-wider bg-[#0f0f10] border-[#1f2022] focus-visible:ring-[#FF4500] focus-visible:ring-offset-0 h-11 api-key-input"
+                    placeholder={provider === 'openai' ? 'sk-...' : 'sk-ant-...'}
+                    aria-describedby="apiKeyHelp"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    data-testid="reveal-api-key-toggle"
+                    onClick={() => setReveal(r => !r)}
+                    disabled={loading}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 h-8 px-3 text-xs text-zinc-400 hover:text-zinc-200 hover:bg-[#1f2022]"
+                  >
+                    {reveal ? (
+                      <EyeOff className="w-4 h-4" />
+                    ) : (
+                      <Eye className="w-4 h-4" />
+                    )}
+                  </Button>
+                </div>
+                <p id="apiKeyHelp" className="text-xs text-zinc-500">
+                  Your key is used only to start Moltbot and is stored securely.
+                </p>
+              </div>
+
+              {/* Error Alert */}
+              {error && (
+                <motion.div
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  role="alert"
+                  data-testid="startup-error"
+                  className="rounded-lg border border-red-900/60 bg-red-950/40 text-red-300 px-4 py-3 text-sm"
+                >
+                  {error}
+                </motion.div>
+              )}
+
+              {/* Progress Indicator */}
+              {loading && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="space-y-3"
+                >
+                  <Progress 
+                    value={progress} 
+                    data-testid="startup-progress" 
+                    className="h-2 bg-[#1f2022]"
+                  />
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin text-[#FF4500]" />
+                    <p 
+                      className="text-sm text-zinc-400" 
+                      data-testid="startup-status-text"
+                      aria-live="polite"
+                    >
+                      {stageText}
+                    </p>
+                  </div>
+                </motion.div>
+              )}
+            </CardContent>
+
+            <CardFooter className="flex flex-col sm:flex-row justify-between gap-4 pt-2">
+              <Button
+                onClick={start}
+                data-testid="start-moltbot-button"
+                disabled={loading || !provider || !apiKey}
+                className="w-full sm:w-auto bg-[#FF4500] hover:bg-[#E63E00] text-white font-medium h-11 px-6 btn-primary"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Starting...
+                  </>
+                ) : (
+                  'Start Moltbot'
+                )}
+              </Button>
+              
+              <a
+                href="https://docs.molt.bot/web/control-ui"
+                target="_blank"
+                rel="noreferrer"
+                className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors flex items-center gap-1"
+                data-testid="docs-link"
+              >
+                Documentation
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </CardFooter>
+          </Card>
+        </motion.div>
+
+        {/* Footer Info */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.3, delay: 0.3 }}
+          className="max-w-lg mt-8 text-center text-xs text-zinc-600"
+        >
+          <p>
+            Moltbot is an open-source personal AI assistant.{' '}
+            <a 
+              href="https://github.com/moltbot/moltbot" 
+              target="_blank" 
+              rel="noreferrer"
+              className="text-zinc-500 hover:text-zinc-400 underline underline-offset-2"
+              data-testid="help-link"
+            >
+              Learn more on GitHub
+            </a>
+          </p>
+        </motion.div>
+      </main>
+    </div>
+  );
+}
