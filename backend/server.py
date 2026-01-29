@@ -418,15 +418,26 @@ async def websocket_proxy(websocket: WebSocket):
         await websocket.close(code=1013, reason="Moltbot not running")
         return
     
+    # Get the token from state
+    token = gateway_state.get("token")
+    
+    # Moltbot expects WebSocket connection with optional auth in query params
     moltbot_ws_url = f"ws://127.0.0.1:{MOLTBOT_PORT}/"
+    
     logger.info(f"WebSocket proxy connecting to: {moltbot_ws_url}")
     
     try:
+        # Additional headers for connection
+        extra_headers = {}
+        if token:
+            extra_headers["X-Auth-Token"] = token
+        
         async with websockets.connect(
             moltbot_ws_url,
             ping_interval=20,
             ping_timeout=20,
-            close_timeout=10
+            close_timeout=10,
+            additional_headers=extra_headers if extra_headers else None
         ) as moltbot_ws:
             
             async def client_to_moltbot():
