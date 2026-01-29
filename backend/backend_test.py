@@ -165,6 +165,117 @@ class MoltbotAPITester:
         
         return success1 and success2
 
+    def test_auth_unauthenticated(self):
+        """Test that unauthenticated requests are rejected"""
+        print("\n--- Testing Unauthenticated Access ---")
+        
+        # Test GET /auth/me without token
+        success1, _ = self.run_test(
+            "GET /auth/me (unauthenticated)",
+            "GET",
+            "auth/me",
+            401
+        )
+        
+        # Test POST /moltbot/start without token
+        success2, _ = self.run_test(
+            "POST /moltbot/start (unauthenticated)",
+            "POST",
+            "moltbot/start",
+            401,
+            data={"provider": "anthropic", "apiKey": "sk-ant-test-1234567890"}
+        )
+        
+        # Test POST /moltbot/stop without token
+        success3, _ = self.run_test(
+            "POST /moltbot/stop (unauthenticated)",
+            "POST",
+            "moltbot/stop",
+            401
+        )
+        
+        # Test GET /moltbot/token without token
+        success4, _ = self.run_test(
+            "GET /moltbot/token (unauthenticated)",
+            "GET",
+            "moltbot/token",
+            401
+        )
+        
+        return success1 and success2 and success3 and success4
+
+    def test_auth_with_token(self, token):
+        """Test authenticated access with token"""
+        print("\n--- Testing Authenticated Access ---")
+        
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {token}'
+        }
+        
+        # Test GET /auth/me with token
+        success, response = self.run_test(
+            "GET /auth/me (authenticated)",
+            "GET",
+            "auth/me",
+            200,
+            headers=headers
+        )
+        
+        if success:
+            data = response.json()
+            if 'user_id' in data and 'email' in data:
+                print("   ✓ User data returned correctly")
+            else:
+                print("   ⚠ User data missing expected fields")
+        
+        return success
+
+    def test_moltbot_status_with_auth(self, token):
+        """Test Moltbot status with authentication"""
+        print("\n--- Testing Moltbot Status (Authenticated) ---")
+        
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {token}'
+        }
+        
+        success, response = self.run_test(
+            "GET /moltbot/status (authenticated)",
+            "GET",
+            "moltbot/status",
+            200,
+            headers=headers
+        )
+        
+        if success:
+            data = response.json()
+            print(f"   Running: {data.get('running')}")
+            if data.get('running'):
+                print(f"   Owner: {data.get('owner_user_id')}")
+                print(f"   Is Owner: {data.get('is_owner')}")
+        
+        return success
+
+    def test_logout(self, token):
+        """Test logout endpoint"""
+        print("\n--- Testing Logout ---")
+        
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {token}'
+        }
+        
+        success, response = self.run_test(
+            "POST /auth/logout",
+            "POST",
+            "auth/logout",
+            200,
+            headers=headers
+        )
+        
+        return success
+
     def print_summary(self):
         """Print test summary"""
         print("\n" + "="*60)
