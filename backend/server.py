@@ -869,6 +869,19 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+async def startup_event():
+    """Run on server startup - ensure Moltbot dependencies are installed"""
+    logger.info("Server starting up...")
+    
+    # Check and install Moltbot dependencies if needed
+    clawdbot_cmd = get_clawdbot_command()
+    if clawdbot_cmd:
+        logger.info(f"Moltbot dependencies ready: {clawdbot_cmd}")
+    else:
+        logger.info("Moltbot dependencies not found, will install on first use")
+
+
 @app.on_event("shutdown")
 async def shutdown_db_client():
     # Stop Moltbot gateway on shutdown
