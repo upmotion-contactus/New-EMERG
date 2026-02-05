@@ -1,5 +1,5 @@
-from fastapi import FastAPI, APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Request, Response
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Request, Response, UploadFile, File, BackgroundTasks
+from fastapi.responses import HTMLResponse, FileResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from starlette.websockets import WebSocketState
@@ -12,12 +12,20 @@ import subprocess
 import asyncio
 import httpx
 import websockets
+import csv
 from websockets.exceptions import ConnectionClosed
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import uuid
 from datetime import datetime, timezone, timedelta
+
+# Lead scraper imports
+from industry_config import get_all_industries, detect_industry, matches_industry
+from fb_scraper import (
+    scrape_facebook_group, load_cookies, save_cookies, 
+    delete_cookies, cookies_exist, SCRAPE_DIR
+)
 
 # WhatsApp monitoring
 from whatsapp_monitor import get_whatsapp_status, fix_registered_flag
@@ -1108,6 +1116,323 @@ async def websocket_proxy(websocket: WebSocket):
                 await websocket.close(code=1011, reason="Proxy connection ended")
         except:
             pass
+
+
+# ============== Scrape File Management ==============
+
+SCRAPE_FILES_DIR = "/app/scrape_files"
+
+def get_file_tags(filename: str) -> List[str]:
+    """Generate tags based on filename keywords"""
+    tags = []
+    filename_lower = filename.lower()
+    
+    tag_keywords = {
+        'plumbing': 'Plumbing',
+        'hvac': 'HVAC',
+        'electrical': 'Electrical',
+        'remodeling': 'Remodeling',
+        'landscaping': 'Landscaping',
+        'power_washing': 'Power Washing',
+        'usa': 'USA',
+        'leads': 'Leads',
+        'all_': 'All'
+    }
+    
+    for keyword, tag in tag_keywords.items():
+        if keyword in filename_lower:
+            tags.append(tag)
+    
+    return tags
+
+
+def count_csv_records(filepath: str) -> int:
+    """Count records in a CSV file"""
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            next(reader, None)  # Skip header
+            return sum(1 for _ in reader)
+    except:
+        return 0
+
+
+@api_router.get("/scrapes")
+async def list_scrape_files():
+    """List all scraped CSV files with metadata"""
+    os.makedirs(SCRAPE_FILES_DIR, exist_ok=True)
+    
+    files = []
+    total_records = 0
+    
+    for filename in os.listdir(SCRAPE_FILES_DIR):
+        if filename.endswith('.csv'):
+            filepath = os.path.join(SCRAPE_FILES_DIR, filename)
+            stat = os.stat(filepath)
+            records = count_csv_records(filepath)
+            total_records += records
+            
+            files.append({
+                'name': filename,
+                'size': stat.st_size,
+                'records': records,
+                'uploaded_at': datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                'tags': get_file_tags(filename)
+            })
+    
+    # Sort by upload date (newest first)
+    files.sort(key=lambda x: x['uploaded_at'], reverse=True)
+    
+    return {
+        'files': files,
+        'total_files': len(files),
+        'total_records': total_records
+    }
+
+
+@api_router.post("/scrapes/upload")
+async def upload_scrape_file(file: UploadFile = File(...)):
+    """Upload a CSV file to the scrape database"""
+    os.makedirs(SCRAPE_FILES_DIR, exist_ok=True)
+    
+    if not file.filename.endswith('.csv'):
+        raise HTTPException(status_code=400, detail="Only CSV files are allowed")
+    
+    filepath = os.path.join(SCRAPE_FILES_DIR, file.filename)
+    
+    content = await file.read()
+    with open(filepath, 'wb') as f:
+        f.write(content)
+    
+    records = count_csv_records(filepath)
+    
+    return {
+        'success': True,
+        'filename': file.filename,
+        'records': records,
+        'message': f'Uploaded {file.filename} with {records} records'
+    }
+
+
+@api_router.get("/scrapes/download/{filename}")
+async def download_scrape_file(filename: str):
+    """Download a specific CSV file"""
+    filepath = os.path.join(SCRAPE_FILES_DIR, filename)
+    
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    return FileResponse(
+        filepath,
+        media_type='text/csv',
+        filename=filename
+    )
+
+
+@api_router.delete("/scrapes/{filename}")
+async def delete_scrape_file(filename: str):
+    """Delete a specific CSV file"""
+    filepath = os.path.join(SCRAPE_FILES_DIR, filename)
+    
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    os.remove(filepath)
+    
+    return {'success': True, 'message': f'Deleted {filename}'}
+
+
+# ============== Facebook Group Scraper ==============
+
+# Store active scraping jobs
+scraper_jobs: Dict[str, Dict] = {}
+
+
+class ScraperStartRequest(BaseModel):
+    urls: List[str]
+    industry: str
+
+
+class DetectIndustryRequest(BaseModel):
+    text: str
+
+
+class SaveCookiesRequest(BaseModel):
+    cookies: List[Dict[str, Any]]
+
+
+@api_router.get("/scraper/industries")
+async def get_industries():
+    """Get list of supported industries"""
+    return {'industries': get_all_industries()}
+
+
+@api_router.post("/scraper/detect-industry")
+async def detect_industry_endpoint(request: DetectIndustryRequest):
+    """Detect industry from text"""
+    industry = detect_industry(request.text)
+    return {'industry': industry}
+
+
+@api_router.get("/scraper/cookies/status")
+async def get_cookies_status():
+    """Check if Facebook cookies are configured"""
+    return {'configured': cookies_exist()}
+
+
+@api_router.post("/scraper/cookies/save")
+async def save_cookies_endpoint(request: SaveCookiesRequest):
+    """Save Facebook cookies"""
+    if not request.cookies:
+        raise HTTPException(status_code=400, detail="No cookies provided")
+    
+    if save_cookies(request.cookies):
+        return {'success': True, 'message': 'Cookies saved successfully'}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to save cookies")
+
+
+@api_router.delete("/scraper/cookies")
+async def delete_cookies_endpoint():
+    """Delete saved Facebook cookies"""
+    if delete_cookies():
+        return {'success': True, 'message': 'Cookies deleted'}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to delete cookies")
+
+
+async def run_scraper_job(job_id: str, urls: List[str], industry: str):
+    """Background task to run the scraper"""
+    
+    def status_callback(status: Dict):
+        """Update job status in memory and database"""
+        if job_id in scraper_jobs:
+            scraper_jobs[job_id].update(status)
+            # Also update in database
+            asyncio.create_task(update_job_in_db(job_id, status))
+    
+    try:
+        result = await scrape_facebook_group(
+            urls=urls,
+            industry=industry,
+            status_callback=status_callback,
+            job_id=job_id
+        )
+        
+        # Update final status
+        final_status = {
+            'status': 'completed' if result.get('success') else 'error',
+            'results': result.get('results', []),
+            'total_matches': result.get('total_matches', 0),
+            'total_scanned': result.get('total_scanned', 0),
+            'completed_at': datetime.now(timezone.utc).isoformat()
+        }
+        
+        if job_id in scraper_jobs:
+            scraper_jobs[job_id].update(final_status)
+        
+        await update_job_in_db(job_id, final_status)
+        
+    except Exception as e:
+        logger.error(f"Scraper job {job_id} failed: {e}")
+        error_status = {
+            'status': 'error',
+            'message': str(e),
+            'completed_at': datetime.now(timezone.utc).isoformat()
+        }
+        if job_id in scraper_jobs:
+            scraper_jobs[job_id].update(error_status)
+        await update_job_in_db(job_id, error_status)
+
+
+async def update_job_in_db(job_id: str, status: Dict):
+    """Update job status in MongoDB"""
+    try:
+        await db.scraper_jobs.update_one(
+            {'job_id': job_id},
+            {'$set': status},
+            upsert=True
+        )
+    except Exception as e:
+        logger.error(f"Failed to update job in DB: {e}")
+
+
+@api_router.post("/scraper/start")
+async def start_scraper(request: ScraperStartRequest, background_tasks: BackgroundTasks):
+    """Start a new scraping job"""
+    
+    if not request.urls:
+        raise HTTPException(status_code=400, detail="No URLs provided")
+    
+    if not cookies_exist():
+        raise HTTPException(status_code=400, detail="Facebook cookies not configured")
+    
+    # Create job
+    job_id = str(uuid.uuid4())
+    job_data = {
+        'job_id': job_id,
+        'urls': request.urls,
+        'industry': request.industry,
+        'status': 'starting',
+        'message': 'Initializing scraper...',
+        'members_scanned': 0,
+        'matches_found': 0,
+        'started_at': datetime.now(timezone.utc).isoformat()
+    }
+    
+    scraper_jobs[job_id] = job_data
+    
+    # Save to database
+    await db.scraper_jobs.insert_one(job_data.copy())
+    
+    # Start background task
+    background_tasks.add_task(run_scraper_job, job_id, request.urls, request.industry)
+    
+    return {'job_id': job_id, 'status': 'starting'}
+
+
+@api_router.get("/scraper/job/{job_id}")
+async def get_job_status(job_id: str):
+    """Get status of a scraping job"""
+    
+    # Check in-memory first
+    if job_id in scraper_jobs:
+        return scraper_jobs[job_id]
+    
+    # Check database
+    job = await db.scraper_jobs.find_one({'job_id': job_id}, {'_id': 0})
+    if job:
+        return job
+    
+    raise HTTPException(status_code=404, detail="Job not found")
+
+
+@api_router.post("/scraper/job/{job_id}/stop")
+async def stop_job(job_id: str):
+    """Stop a running scraping job"""
+    
+    if job_id in scraper_jobs:
+        scraper_jobs[job_id]['status'] = 'stopped'
+        scraper_jobs[job_id]['message'] = 'Job stopped by user'
+        await update_job_in_db(job_id, {
+            'status': 'stopped',
+            'message': 'Job stopped by user',
+            'stopped_at': datetime.now(timezone.utc).isoformat()
+        })
+        return {'success': True, 'message': 'Job stop requested'}
+    
+    raise HTTPException(status_code=404, detail="Job not found or already completed")
+
+
+@api_router.get("/scraper/jobs")
+async def list_jobs():
+    """List recent scraping jobs"""
+    jobs = await db.scraper_jobs.find(
+        {}, 
+        {'_id': 0}
+    ).sort('started_at', -1).limit(50).to_list(50)
+    
+    return {'jobs': jobs}
 
 
 # ============== Legacy Status Endpoints ==============

@@ -3,7 +3,7 @@ import sys
 from datetime import datetime
 
 class MoltbotAPITester:
-    def __init__(self, base_url="https://brave-torvalds.preview.emergent.test/api"):
+    def __init__(self, base_url="https://silly-lovelace-1.preview.emergentagent.com/api"):
         self.base_url = base_url
         self.tests_run = 0
         self.tests_passed = 0
@@ -85,7 +85,7 @@ class MoltbotAPITester:
         success, response = self.run_test(
             "Moltbot Status (Initial)",
             "GET",
-            "moltbot/status",
+            "openclaw/status",
             200
         )
         if success:
@@ -110,7 +110,7 @@ class MoltbotAPITester:
         success1, _ = self.run_test(
             "Start without provider",
             "POST",
-            "moltbot/start",
+            "openclaw/start",
             422,  # Validation error
             data={"apiKey": "test-key-1234567890"},
             headers=headers
@@ -120,7 +120,7 @@ class MoltbotAPITester:
         success2, _ = self.run_test(
             "Start with invalid provider",
             "POST",
-            "moltbot/start",
+            "openclaw/start",
             400,
             data={"provider": "invalid", "apiKey": "test-key-1234567890"},
             headers=headers
@@ -130,7 +130,7 @@ class MoltbotAPITester:
         success3, _ = self.run_test(
             "Start with short API key",
             "POST",
-            "moltbot/start",
+            "openclaw/start",
             400,
             data={"provider": "anthropic", "apiKey": "short"},
             headers=headers
@@ -175,26 +175,26 @@ class MoltbotAPITester:
         
         # Test POST /moltbot/start without token
         success2, _ = self.run_test(
-            "POST /moltbot/start (unauthenticated)",
+            "POST /openclaw/start (unauthenticated)",
             "POST",
-            "moltbot/start",
+            "openclaw/start",
             401,
             data={"provider": "anthropic", "apiKey": "sk-ant-test-1234567890"}
         )
         
         # Test POST /moltbot/stop without token
         success3, _ = self.run_test(
-            "POST /moltbot/stop (unauthenticated)",
+            "POST /openclaw/stop (unauthenticated)",
             "POST",
-            "moltbot/stop",
+            "openclaw/stop",
             401
         )
         
         # Test GET /moltbot/token without token
         success4, _ = self.run_test(
-            "GET /moltbot/token (unauthenticated)",
+            "GET /openclaw/token (unauthenticated)",
             "GET",
-            "moltbot/token",
+            "openclaw/token",
             401
         )
         
@@ -237,9 +237,9 @@ class MoltbotAPITester:
         }
         
         success, response = self.run_test(
-            "GET /moltbot/status (authenticated)",
+            "GET /openclaw/status (authenticated)",
             "GET",
-            "moltbot/status",
+            "openclaw/status",
             200,
             headers=headers
         )
@@ -293,7 +293,7 @@ class MoltbotAPITester:
         success1, response1 = self.run_test(
             "Owner checks status",
             "GET",
-            "moltbot/status",
+            "openclaw/status",
             200,
             headers=owner_headers
         )
@@ -301,7 +301,7 @@ class MoltbotAPITester:
         success2, response2 = self.run_test(
             "Other user checks status",
             "GET",
-            "moltbot/status",
+            "openclaw/status",
             200,
             headers=other_headers
         )
@@ -313,6 +313,166 @@ class MoltbotAPITester:
             if not data1.get('running') and not data2.get('running'):
                 print("   ✓ Both users see Moltbot is not running")
             
+        return success1 and success2
+
+    def test_scraper_industries(self):
+        """Test GET /api/scraper/industries endpoint"""
+        print("\n--- Testing Scraper Industries ---")
+        
+        success, response = self.run_test(
+            "GET /scraper/industries",
+            "GET",
+            "scraper/industries",
+            200
+        )
+        
+        if success:
+            data = response.json()
+            industries = data.get('industries', [])
+            expected_industries = ['plumbing', 'hvac', 'electrical', 'remodeling', 'landscaping', 'power_washing']
+            
+            if len(industries) == 6:
+                print(f"   ✓ Found {len(industries)} industries")
+                print(f"   Industries: {industries}")
+                
+                # Check if all expected industries are present
+                missing = [ind for ind in expected_industries if ind not in industries]
+                if not missing:
+                    print("   ✓ All expected industries present")
+                    return True
+                else:
+                    print(f"   ⚠ Missing industries: {missing}")
+            else:
+                print(f"   ❌ Expected 6 industries, got {len(industries)}")
+        
+        return False
+
+    def test_scraper_detect_industry(self):
+        """Test POST /api/scraper/detect-industry endpoint"""
+        print("\n--- Testing Industry Detection ---")
+        
+        test_cases = [
+            ("https://facebook.com/groups/plumbingpros", "plumbing"),
+            ("HVAC contractors group", "hvac"),
+            ("Electrical work discussion", "electrical"),
+            ("Home remodeling tips", "remodeling"),
+            ("Landscaping business owners", "landscaping"),
+            ("Power washing services", "power_washing")
+        ]
+        
+        all_success = True
+        for text, expected in test_cases:
+            success, response = self.run_test(
+                f"Detect industry for: {text[:30]}...",
+                "POST",
+                "scraper/detect-industry",
+                200,
+                data={"text": text}
+            )
+            
+            if success:
+                data = response.json()
+                detected = data.get('industry')
+                if detected == expected:
+                    print(f"   ✓ Correctly detected '{detected}'")
+                else:
+                    print(f"   ⚠ Expected '{expected}', got '{detected}'")
+            else:
+                all_success = False
+        
+        return all_success
+
+    def test_scraper_cookies_status(self):
+        """Test GET /api/scraper/cookies/status endpoint"""
+        print("\n--- Testing Cookie Status ---")
+        
+        success, response = self.run_test(
+            "GET /scraper/cookies/status",
+            "GET",
+            "scraper/cookies/status",
+            200
+        )
+        
+        if success:
+            data = response.json()
+            configured = data.get('configured', False)
+            print(f"   Cookies configured: {configured}")
+            return True
+        
+        return False
+
+    def test_scrapes_list(self):
+        """Test GET /api/scrapes endpoint"""
+        print("\n--- Testing Scrapes List ---")
+        
+        success, response = self.run_test(
+            "GET /scrapes",
+            "GET",
+            "scrapes",
+            200
+        )
+        
+        if success:
+            data = response.json()
+            files = data.get('files', [])
+            total_files = data.get('total_files', 0)
+            total_records = data.get('total_records', 0)
+            
+            print(f"   Files: {len(files)}")
+            print(f"   Total files: {total_files}")
+            print(f"   Total records: {total_records}")
+            
+            # Should be empty initially or contain existing files
+            if isinstance(files, list) and isinstance(total_files, int) and isinstance(total_records, int):
+                print("   ✓ Response structure is correct")
+                return True
+        
+        return False
+
+    def test_scraper_jobs_list(self):
+        """Test GET /api/scraper/jobs endpoint"""
+        print("\n--- Testing Scraper Jobs List ---")
+        
+        success, response = self.run_test(
+            "GET /scraper/jobs",
+            "GET",
+            "scraper/jobs",
+            200
+        )
+        
+        if success:
+            data = response.json()
+            jobs = data.get('jobs', [])
+            print(f"   Jobs: {len(jobs)}")
+            
+            if isinstance(jobs, list):
+                print("   ✓ Response structure is correct")
+                return True
+        
+        return False
+
+    def test_scraper_start_validation(self):
+        """Test POST /api/scraper/start validation"""
+        print("\n--- Testing Scraper Start Validation ---")
+        
+        # Test 1: No URLs provided
+        success1, _ = self.run_test(
+            "Start scraper without URLs",
+            "POST",
+            "scraper/start",
+            400,
+            data={"urls": [], "industry": "plumbing"}
+        )
+        
+        # Test 2: No cookies configured (should fail)
+        success2, _ = self.run_test(
+            "Start scraper without cookies",
+            "POST",
+            "scraper/start",
+            400,
+            data={"urls": ["https://facebook.com/groups/test"], "industry": "plumbing"}
+        )
+        
         return success1 and success2
 
     def print_summary(self):
@@ -334,7 +494,7 @@ class MoltbotAPITester:
 
 def main():
     print("="*60)
-    print("🦞 MOLTBOT API TESTING WITH AUTHENTICATION")
+    print("🦞 MOLTBOT API TESTING WITH LEAD SCRAPER")
     print("="*60)
     print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
@@ -351,6 +511,14 @@ def main():
     # Run tests
     print("\n--- Basic API Tests ---")
     tester.test_root_endpoint()
+    
+    print("\n--- Lead Scraper API Tests ---")
+    tester.test_scraper_industries()
+    tester.test_scraper_detect_industry()
+    tester.test_scraper_cookies_status()
+    tester.test_scrapes_list()
+    tester.test_scraper_jobs_list()
+    tester.test_scraper_start_validation()
     
     print("\n--- Authentication Tests (Unauthenticated) ---")
     tester.test_auth_unauthenticated()

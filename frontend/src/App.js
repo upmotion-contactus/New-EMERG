@@ -4,6 +4,8 @@ import { BrowserRouter, Routes, Route, useLocation, Navigate } from "react-route
 import LoginPage from "@/pages/LoginPage";
 import SetupPage from "@/pages/SetupPage";
 import AuthCallback from "@/pages/AuthCallback";
+import ScrapeDashboard from "@/pages/ScrapeDashboard";
+import ScraperDashboard from "@/pages/ScraperDashboard";
 import { Toaster } from "@/components/ui/sonner";
 
 // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
@@ -21,6 +23,8 @@ function AppRouter() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/" element={<SetupPage />} />
+      <Route path="/scrapes" element={<ScrapeDashboard />} />
+      <Route path="/scraper" element={<ScraperDashboard />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
