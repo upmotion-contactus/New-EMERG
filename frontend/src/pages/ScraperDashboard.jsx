@@ -45,7 +45,7 @@ export default function ScraperDashboard() {
   const pollingRef = useRef(null);
 
   // Stats from job history
-  const [totalStats, setTotalStats] = useState({ leads: 0, withPhone: 0, withWebsite: 0 });
+  const [totalStats, setTotalStats] = useState({ leads: 0, withPhone: 0, noWebsiteWithPhone: 0 });
 
   useEffect(() => {
     fetch(`${API}/scraper/industries`)
